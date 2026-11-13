@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --fg: #1b1b1e; --bg: #ffffff; --dim: #8a8a8f; --line: #e6e6e9;
+    --sel: #e8f0ff; --accent: #2f6fed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e8e8ea; --bg: #1c1c1e; --dim: #8e8e93; --line: #2c2c2e;
+      --sel: #22304d; --accent: #6b9bff;
+    }
+  }
+  /* 背景三档：默认交给 IINA 的液态玻璃，只叠自己需要的那点 */
+  body.bg-glass   { background: transparent; }
+  body.bg-frosted { background: rgba(255, 255, 255, 0.62); }
+  body.bg-solid   { background: var(--bg); }
+  @media (prefers-color-scheme: dark) {
+    body.bg-frosted { background: rgba(28, 28, 30, 0.62); }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: transparent; color: var(--fg);
+    font: 12px/1.45 -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  header {
+    padding: 8px 10px 6px; border-bottom: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto;
+  }
+  .row { display: flex; align-items: center; gap: 6px; }
+  input[type=search] {
+    flex: 1; min-width: 0; padding: 5px 8px; border-radius: 6px;
+    border: 1px solid var(--line); background: transparent; color: var(--fg);
+    font-size: 12px; outline: none;
+  }
+  input[type=search]:focus { border-color: var(--accent); }
+  button {
+    border: 1px solid var(--line); background: transparent; color: var(--fg);
+    border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  #note { color: var(--dim); padding: 10px; font-size: 12px; }
+  #list { flex: 1 1 auto; overflow-y: auto; padding: 2px 0 40px; }
+  .cue {
+    display: grid; grid-template-columns: 52px 1fr; gap: 8px;
+    padding: 4px 10px; cursor: default; border-left: 2px solid transparent;
+    align-items: start;
+  }
+  .cue:hover { background: var(--sel); }
+  .cue .t { color: var(--dim); font-variant-numeric: tabular-nums; font-size: calc(1em - 1px); padding-top: 1px; }
+  .cue .x { white-space: normal; word-break: break-word; }
+  .cue.active { background: var(--sel); border-left-color: var(--accent); }
+  body.bg-glass .cue:hover, body.bg-glass .cue.active { background: rgba(120, 120, 140, 0.18); }
+  .cue.active .t { color: var(--accent); }
+  mark { background: rgba(255, 214, 10, .45); color: inherit; border-radius: 2px; }
+  .ctl { gap: 4px; }
+  .ctl button { padding: 2px 7px; font-size: 11px; }
+  .spacer { flex: 1 1 auto; }
+  .dimnum { color: var(--dim); font-size: 11px; min-width: 18px; text-align: center; }
+  button.on {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  button.on:hover { color: #fff; filter: brightness(1.06); }
+  #dbg { margin: 6px 10px; font-size: 11px; color: var(--dim); }
+  #dbg summary { cursor: pointer; }
+  #dbg pre { white-space: pre-wrap; word-break: break-all; margin: 4px 0 0;
+             font: 10.5px/1.4 ui-monospace, Menlo, monospace; color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <input id="q" type="search" placeholder="Search subtitles…   ⌘F" data-i18n-ph="search_ph" autocomplete="off" spellcheck="false">
+    <button id="reload" title="Reload subtitles" data-i18n-title="reload_title">↻</button>
+  </div>
+  <div class="row ctl">
+    <button id="follow" class="toggle on" data-i18n="follow" data-i18n-title="follow_title" title="Auto-scroll to the line being played">Follow</button>
+    <span class="spacer"></span>
+    <button id="fsdown" title="Smaller text" data-i18n-title="font_small">A−</button>
+    <span id="fsv" class="dimnum">12</span>
+    <button id="fsup" title="Larger text" data-i18n-title="font_big">A+</button>
+    <button id="bgbtn" title="Background: glass / frosted / solid" data-i18n-title="bg_title"><span id="bgn">Frosted</span></button>
+  </div>
+</header>
+<div id="note" hidden></div>
+<details id="dbg" hidden><summary data-i18n="diag">Diagnostics</summary><pre id="dbglog"></pre></details>
+<div id="list"></div>
+
+<script src="i18n.js"></script>
+<script>
+const list = document.getElementById("list");
+const q = document.getElementById("q");
+const note = document.getElementById("note");
+const follow = document.getElementById("follow");
+let followOn = true;
+
+let cues = [];
+let rows = [];          // 与过滤结果对应的 DOM 节点
+let filtered = [];
+let activeIdx = -1;
+let userScrolled = false;
+
+const fmt = (s) => {
+  s = Math.max(0, s);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = Math.floor(s % 60);
+  return h ? `${h}:${String(m).padStart(2,"0")}:${String(x).padStart(2,"0")}`
+           : `${m}:${String(x).padStart(2,"0")}`;
+};
+
+function render() {
+  const term = q.value.trim().toLowerCase();
+  filtered = term ? cues.filter(c => c.text.toLowerCase().includes(term)) : cues;
+  list.textContent = "";
+  rows = [];
+  const frag = document.createDocumentFragment();
+  const limit = Math.min(filtered.length, 8000);
+  for (let i = 0; i < limit; i++) {
+    const c = filtered[i];
+    const d = document.createElement("div");
+    d.className = "cue";
+    const t = document.createElement("div"); t.className = "t"; t.textContent = fmt(c.start);
+    const x = document.createElement("div"); x.className = "x";
+    if (term) {
+      const low = c.text.toLowerCase();
+      let at = low.indexOf(term), from = 0;
+      while (at >= 0) {
+        x.appendChild(document.createTextNode(c.text.slice(from, at)));
+        const mk = document.createElement("mark");
+        mk.textContent = c.text.slice(at, at + term.length);
+        x.appendChild(mk);
+        from = at + term.length; at = low.indexOf(term, from);
+      }
+      x.appendChild(document.createTextNode(c.text.slice(from)));
+    } else {
+      x.textContent = c.text;
+    }
+    d.appendChild(t); d.appendChild(x);
+    d.addEventListener("click", () => {
+      iina.postMessage("seek", { t: c.start });
+      setActive(filtered[i]);
+    });
+    frag.appendChild(d);
+    rows.push(d);
+  }
+  list.appendChild(frag);
+  note.hidden = cues.length > 0;
+  activeIdx = -1;
+}
+
+function setActive(cue) {
+  rows.forEach(r => r.classList.remove("active"));
+  if (!cue) return;
+  const i = filtered.indexOf(cue);
+  if (i >= 0 && rows[i]) {
+    rows[i].classList.add("active");
+    activeIdx = i;
+  }
+}
+
+function onPos(t) {
+  if (!cues.length) return;
+  // 二分找当前句
+  let lo = 0, hi = cues.length - 1, hit = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (t < cues[mid].start) hi = mid - 1;
+    else if (t > cues[mid].end) lo = mid + 1;
+    else { hit = mid; break; }
+  }
+  if (hit < 0) {   // 落在空隙里：取前一句
+    for (let i = cues.length - 1; i >= 0; i--) { if (cues[i].start <= t) { hit = i; break; } }
+  }
+  if (hit < 0) return;
+  const cue = cues[hit];
+  const i = filtered.indexOf(cue);
+  if (i === activeIdx) return;
+  rows.forEach(r => r.classList.remove("active"));
+  activeIdx = i;
+  if (i >= 0 && rows[i]) {
+    rows[i].classList.add("active");
+    if (followOn && !userScrolled) {
+      rows[i].scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+}
+
+let gotData = false;
+
+const BGORDER = ["glass", "frosted", "solid"];
+let pf = { bg: "frosted", fontSize: 12, diagnostics: false };
+let LANG = I18N.resolve(navigator.language);
+I18N.apply(LANG);
+
+function paintBgName() {
+  document.getElementById("bgn").textContent = I18N.t(LANG, "bg_" + pf.bg);
+}
+
+function setLang(code) {
+  LANG = I18N.resolve(code || navigator.language);
+  I18N.apply(LANG);
+  paintBgName();
+}
+
+function applyPref(p) {
+  if (!p) return;
+  if (p.bg) pf.bg = p.bg;
+  if (p.fontSize) pf.fontSize = Number(p.fontSize) || 12;
+  if (p.diagnostics !== undefined) pf.diagnostics = !!p.diagnostics;
+  document.body.className = "bg-" + pf.bg;
+  document.body.style.fontSize = pf.fontSize + "px";
+  document.getElementById("fsv").textContent = pf.fontSize;
+  paintBgName();
+  applyDbgVisibility();
+}
+
+function savePref() {
+  applyPref(pf);
+  iina.postMessage("savePref", { bg: pf.bg, fontSize: pf.fontSize, diagnostics: pf.diagnostics });
+}
+
+document.getElementById("fsup").addEventListener("click", () => { pf.fontSize = Math.min(16, pf.fontSize + 1); savePref(); });
+document.getElementById("fsdown").addEventListener("click", () => { pf.fontSize = Math.max(11, pf.fontSize - 1); savePref(); });
+document.getElementById("bgbtn").addEventListener("click", () => {
+  pf.bg = BGORDER[(BGORDER.indexOf(pf.bg) + 1) % BGORDER.length];
+  savePref();
+});
+
+iina.onMessage("pref", (d) => { applyPref(d); if (d && d.lang) setLang(d.lang); });
+function applyDbgVisibility() {
+  const dbg = document.getElementById("dbg");
+  const has = document.getElementById("dbglog").textContent.trim() !== "";
+  dbg.hidden = !(pf.diagnostics && has);
+}
+
+function showDbg(text) {
+  document.getElementById("dbglog").textContent = text || "";
+  applyDbgVisibility();
+}
+
+iina.onMessage("data", (d) => {
+  gotData = true;
+  applyPref(d.pref);
+  setLang(d.pref && d.pref.lang);
+  cues = d.cues || [];
+  if (d.source) document.title = d.source;
+  if (d.note) { note.textContent = d.note; note.hidden = false; }
+  else note.hidden = true;
+  showDbg((d.log || []).join("\n") + (d.url ? "\nurl: " + d.url : ""));
+  render();
+});
+
+iina.onMessage("err", (d) => {
+  gotData = true;
+  note.textContent = I18N.t(LANG, "err_prefix") + (d.message || d.stage || "");
+  note.hidden = false;
+  showDbg([d.message].concat(d.log || []).join("\n"));
+});
+
+iina.onMessage("pong", (d) => {
+  gotData = true;
+  showDbg((d.log || []).join("\n"));
+});
+
+setTimeout(() => {
+  if (gotData) return;
+  note.textContent = I18N.t(LANG, "no_resp");
+  note.hidden = false;
+  note.style.cursor = "pointer";
+  note.onclick = () => { try { iina.postMessage("ping", {}); } catch (e) {} };
+}, 2500);
+
+try { iina.postMessage("ping", {}); } catch (e) {}
+
+iina.onMessage("pos", (d) => onPos(d.t));
+
+q.addEventListener("input", () => { render(); });
+q.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { q.value = ""; render(); }
+  if (e.key === "Enter" && filtered.length) {
+    iina.postMessage("seek", { t: filtered[0].start });
+  }
+});
+follow.addEventListener("click", () => {
+  followOn = !followOn;
+  follow.classList.toggle("on", followOn);
+});
+document.getElementById("reload").addEventListener("click", () => iina.postMessage("reload", {}));
+list.addEventListener("wheel", () => { userScrolled = true; setTimeout(() => { userScrolled = false; }, 1500); }, { passive: true });
+window.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") { e.preventDefault(); q.focus(); q.select(); }
+});
+
+iina.postMessage("ready", {});
+</script>
+</body>
+</html>

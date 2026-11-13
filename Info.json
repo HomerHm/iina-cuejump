@@ -1,0 +1,24 @@
+{
+  "name": "CueJump",
+  "identifier": "io.github.homerhm.iina-cuejump",
+  "version": "1.2.2",
+  "description": "A sidebar that lists every subtitle line: search it, click to jump.",
+  "author": {
+    "name": "HomerHm",
+    "url": "https://github.com/HomerHm"
+  },
+  "entry": "main.js",
+  "permissions": ["show-osd", "file-system"],
+  "sidebarTab": {
+    "name": "CueJump"
+  },
+  "ghRepo": "HomerHm/iina-cuejump",
+  "ghVersion": 1,
+  "preferencesPage": "ui/pref.html",
+  "preferenceDefaults": {
+    "bg": "frosted",
+    "fontSize": 12,
+    "lang": "auto",
+    "diagnostics": false
+  }
+}

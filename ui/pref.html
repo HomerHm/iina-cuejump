@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 13px -apple-system, "SF Pro Text", "PingFang SC", "Hiragino Sans", sans-serif;
+    margin: 16px 18px; color: CanvasText;
+  }
+  .item { margin-bottom: 18px; }
+  .label { font-weight: 600; margin-bottom: 6px; }
+  .hint { opacity: .62; font-size: 11.5px; margin-top: 4px; }
+  label.opt { display: flex; gap: 8px; align-items: baseline; margin: 3px 0; cursor: pointer; }
+  input[type=range] { vertical-align: middle; }
+  select { font: inherit; padding: 3px 6px; }
+</style>
+</head>
+<body>
+  <div class="item">
+    <div class="label" data-i18n="p_bg"></div>
+    <label class="opt"><input type="radio" name="bg" value="glass"><span data-i18n="p_bg_glass"></span></label>
+    <label class="opt"><input type="radio" name="bg" value="frosted"><span data-i18n="p_bg_frosted"></span></label>
+    <label class="opt"><input type="radio" name="bg" value="solid"><span data-i18n="p_bg_solid"></span></label>
+    <div class="hint" data-i18n="p_bg_hint"></div>
+  </div>
+
+  <div class="item">
+    <div class="label" data-i18n="p_font"></div>
+    <input id="fs" type="range" min="11" max="16" step="1">
+    <span id="fsv"></span>
+  </div>
+
+  <div class="item">
+    <label class="opt"><input id="diag" type="checkbox"><span data-i18n="p_diag"></span></label>
+    <div class="hint" data-i18n="p_diag_hint"></div>
+  </div>
+
+  <div class="item">
+    <div class="label" data-i18n="p_lang"></div>
+    <select id="lang">
+      <option value="auto" data-i18n="p_lang_auto"></option>
+      <option value="en">English</option>
+      <option value="zh">中文</option>
+      <option value="ja">日本語</option>
+    </select>
+  </div>
+
+  <div class="item">
+    <div class="label" data-i18n="p_src"></div>
+    <div class="hint" id="src">—</div>
+  </div>
+
+<script src="i18n.js"></script>
+<script>
+const langPref = iina.preferences.get("lang") || "auto";
+let LANG = I18N.resolve(langPref === "auto" ? navigator.language : langPref);
+I18N.apply(LANG);
+
+const sel = document.getElementById("lang");
+sel.value = langPref;
+
+const bgPref = iina.preferences.get("bg") || "frosted";
+document.querySelectorAll('input[name=bg]').forEach((el) => {
+  if (el.value === bgPref) el.checked = true;
+  el.addEventListener("change", () => { if (el.checked) iina.preferences.set("bg", el.value); });
+});
+
+const diag = document.getElementById("diag");
+diag.checked = iina.preferences.get("diagnostics") === true;
+diag.addEventListener("change", () => iina.preferences.set("diagnostics", diag.checked));
+
+const fs = document.getElementById("fs"), fsv = document.getElementById("fsv");
+fs.value = iina.preferences.get("fontSize") || 12;
+fsv.textContent = fs.value + "px";
+fs.addEventListener("input", () => { fsv.textContent = fs.value + "px"; iina.preferences.set("fontSize", Number(fs.value)); });
+
+sel.addEventListener("change", () => {
+  iina.preferences.set("lang", sel.value);
+  LANG = I18N.resolve(sel.value === "auto" ? navigator.language : sel.value);
+  I18N.apply(LANG);
+});
+</script>
+</body>
+</html>
